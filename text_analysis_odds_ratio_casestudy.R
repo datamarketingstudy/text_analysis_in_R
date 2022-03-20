@@ -162,3 +162,4 @@ freq_wide %>%
     filter(`2021기사` > 1 & `2022기사` > 1) %>%
     arrange(abs(1 - odds_ratio)) %>%
     head(5)
+
