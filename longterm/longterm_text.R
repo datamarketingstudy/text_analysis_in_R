@@ -271,3 +271,192 @@ pair %>%
 pair %>%
     filter(item1 == "에스케이티")
 
+# 동시 출현 네트워크
+library(tidygraph)
+
+graph_comment <- pair %>%
+    filter(n >= 35) %>%
+    as_tbl_graph()
+
+graph_comment
+
+# network graph
+library(ggraph)
+
+ggraph(graph_comment) +
+    geom_edge_link() +
+    geom_node_point() +
+    geom_node_text(aes(label = name))
+
+library(showtext)
+font_add_google(name = "Nanum Gothic", family = "nanumgothic")
+showtext_auto()
+
+set.seed(123)
+ggraph(graph_comment, layout = "fr") +
+    geom_edge_link(color = "gray50",
+                   alpha = 0.5) +
+    geom_node_point(color = "lightcoral",
+                    size = 5) +
+    geom_node_text(aes(label = name),
+                   repel = T,
+                   size = 5,
+                   family = "blackhansans") +
+    theme_graph()
+
+# Making Function
+word_network <- function(x){
+    ggraph(x, layout = "fr") +
+        geom_edge_link(color = "gray50",
+                       alpha = 0.5) +
+        geom_node_point(color = "lightcoral",
+                        size = 5) +
+        geom_node_text(aes(label = name),
+                       repel = T,
+                       size = 5,
+                       family = "blackhansans") +
+        theme_graph()
+}
+
+set.seed(1234)
+word_network(graph_comment)
+
+# 유의어 처리
+
+comment <- text_keyword %>%
+    mutate(word = ifelse(str_detect(word, "장기"), "장기고객", word),
+           word = ifelse(str_detect(word, "고객"), "장기고객", word))
+
+pair2 <- comment %>%
+    pairwise_count(item = word,
+                   feature = id,
+                   sort = T)
+
+graph_comment2 <- pair2 %>%
+    filter(n >= 35) %>%
+    as_tbl_graph()
+
+set.seed(4321)
+word_network(graph_comment2)
+
+# 연결 중심성과 커뮤니티 표현하기
+
+# 연결 중심성(degree centrality)는 노드가 다른 노드들과 밀접하게 연결되는지 나타낸 값
+# 커뮤니티(community)란 단어 간의 관계가 가까워 빈번하게 연결된 노드 집단을 의미
+
+set.seed(707)
+graph_comment3 <- pair2 %>%
+    filter(n >= 35) %>%
+    as_tbl_graph(directed = F) %>%
+    mutate(centrality = centrality_degree(), # 연결 중심성
+           group = as.factor(group_infomap())) # 커뮤니티
+graph_comment3
+
+set.seed(808)
+ggraph(graph_comment3, layout = "fr") +
+    geom_edge_link(color = "gray50",
+                   alpha = 0.5) +
+    geom_node_point(aes(size = centrality,
+                        color = group),
+                    show.legend = F) +
+    scale_size(range = c(5, 15)) +
+    geom_node_text(aes(label = name),
+                   repel = T,
+                   size = 5,
+                   family = "blackhansans") +
+    theme_graph()
+
+# 네트워크 주요 단어 살펴보기
+
+graph_comment3 %>%
+    filter(name == "장기고객")
+
+# 같은 커뮤니티로 분류된 단어 살펴보기
+graph_comment3 %>%
+    filter(group == 1) %>%
+    arrange(-centrality) %>%
+    data.frame()
+
+# 연결 중심성이 높은 주요 단어 살펴보기
+graph_comment3 %>%
+    arrange(-centrality)
+
+# 2번 그룹
+graph_comment3 %>%
+filter(group == 2) %>%
+    arrange(-centrality) %>%
+    data.frame()
+
+# 키워드 원문 파악 (통신사 & 혜택)
+text_keyword %>%
+    filter(str_detect(content, "통신사") & str_detect(content, "혜택")) %>%
+    select(content) %>%
+    distinct()
+
+# 키워드 원문 파악 (유플러스 & 에스케이티)
+text_keyword %>%
+    filter(str_detect(content, "유플러스") & str_detect(content, "에스케이티")) %>%
+    select(content) %>%
+    distinct()
+
+## 단어 간 상관 분석 - 파이 계수
+
+# 파이 계수(phi cofficient)는 두 단어가 함께 사용되는 경우가 각각 사용되는 경우에 비해 얼마나 많은지 나타낸 지표
+
+word_cors <- comment %>%
+    add_count(word) %>%
+    filter(n >= 20) %>%
+    pairwise_cor(item = word,
+                 feature = id,
+                 sort = T)
+word_cors
+
+word_cors %>%
+    filter(item1 == "유플러스")
+
+# 관심 단어별로 파이 계수가 큰 단어 추출하기
+target <- c("장기고객", "혜택", "통신사", "유플러스", "에스케이티", "케이티")
+
+top_cors <- word_cors %>%
+    filter(item1 %in% target) %>%
+    group_by(item1) %>%
+    slice_max(correlation, n = 8)
+
+# bar graph
+top_cors$item1 <- factor(top_cors$item1, levels = target)
+
+ggplot(top_cors, aes(x = reorder_within(item2, correlation, item1),
+                     y = correlation,
+                     fill = item1)) +
+    geom_col(show.legend = F) +
+    facet_wrap(~ item1, scales = "free") +
+    coord_flip() +
+    scale_x_reordered() +
+    labs(x = NULL) +
+    theme(text = element_text(family = "blackhansans"))
+
+# 파이 계수로 네트워크 그래프 만들기
+
+set.seed(1234)
+graph_cors <- word_cors %>%
+    filter(correlation >= 0.25) %>%
+    as_tbl_graph(directed = F) %>%
+    mutate(centrality = centrality_degree(),
+           group = as.factor(group_infomap()))
+
+set.seed(1234)
+ggraph(graph_cors, layout = "fr") +
+    geom_edge_link(color = "gray50",
+                   aes(edge_alpha = correlation,
+                       edge_width = correlation),
+                   show.legend = F) +
+    scale_edge_width(range = c(1, 4)) +
+    geom_node_point(aes(size = centrality,
+                        color = group),
+                    show.legend = F) +
+    scale_size(range = c(5, 10)) +
+    geom_node_text(aes(label = name),
+                   repel = T,
+                   size = 5,
+                   family = "blackhansans") +
+    theme_graph()
